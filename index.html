@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SDS Email Assistant (MS Graph API Version)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://alcdn.msauth.net/browser/2.14.2/js/msal-browser.min.js"></script>
+    <style>
+        /* CSS styles mostly unchanged, with additions for manual search */
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 2em; background-color: #f8f9fa; color: #212529; font-size: 14px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+        .container { width: 100%; max-width: 1200px; padding: 2em; background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { color: #343a40; border-bottom: 2px solid #dee2e6; padding-bottom: 0.5em; text-align: center; }
+        .file-upload-area { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+        .file-input-box { padding: 20px; border: 2px dashed #ced4da; border-radius: 8px; background-color: #f8f9fa; text-align: center; }
+        .file-input-box label { font-weight: bold; margin-bottom: 5px; display: block; font-size: 1.1em; }
+        input[type="file"] { width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; margin-top: 10px; }
+        #search-container { margin-bottom: 20px; }
+        #searchInput { width: 100%; padding: 10px; font-size: 1em; border: 1px solid #ced4da; border-radius: 5px; }
+        button { display: block; width: 100%; padding: 12px; font-size: 1em; font-weight: bold; cursor: pointer; color: white; border: none; border-radius: 5px; transition: background-color 0.3s; margin-top: 10px; }
+        .button-disabled { background-color: #6c757d; cursor: not-allowed; }
+        .button-ready { background-color: #28a745; }
+        .button-primary { background-color: #007bff; }
+        .button-primary:hover { background-color: #0056b3; }
+        .button-ready:hover { background-color: #218838; }
+        #results-container { margin-top: 20px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 1em; }
+        th, td { border: 1px solid #dee2e6; text-align: left; padding: 8px; vertical-align: top; word-break: break-word; font-size: 12px; }
+        th { background-color: #e9ecef; position: sticky; top: 0; }
+        tr:nth-child(even) { background-color: #f8f9fa; }
+        .status { font-style: italic; color: #6c757d; text-align: center; padding: 1em; }
+        .sds-match { color: #28a745; font-weight: bold; }
+        .sds-no-match { color: #dc3545; }
+        .processed-row { background-color: #d4edda; color: #155724; }
+        #log-container { width: 100%; max-width: 1200px; margin-top: 20px; padding: 15px; border: 1px solid #dee2e6; border-radius: 8px; background-color: #ffffff; }
+        #log-area { height: 150px; overflow-y: auto; background-color: #f8f9fa; border: 1px solid #ced4da; padding: 10px; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
+        .footer { margin-top: 2em; text-align: center; color: #6c757d; font-size: 0.9em; }
+
+        /* --- STYLES ADDED FROM SALES EMAIL.HTML --- */
+        .sds-search-container {
+            position: relative;
+        }
+        .sds-search-container input {
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .sds-results {
+            display: none;
+            position: absolute;
+            width: 100%;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            background-color: white;
+            z-index: 100;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .sds-results div {
+            padding: 5px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+            font-size: 11px;
+            color: #212529;
+        }
+        .sds-results div:hover {
+            background-color: #e9ecef;
+        }
+        .sds-results div:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>SDS Email Assistant</h1>
+        <p>This tool helps find matching SDS files for your orders and sends them via email. You must be signed in to send emails. Use the search box to find any order by Customer PO.</p>
+
+        <div id="auth-container">
+            <button id="signInButton" onclick="signIn()" class="button-primary">Sign In with Microsoft</button>
+            <button id="signOutButton" onclick="signOut()" class="button-primary" style="display: none;">Sign Out</button>
+            <p id="auth-status" class="status"></p>
+        </div>
+
+        <div class="file-upload-area">
+            <div class="file-input-box">
+                <label for="ordersFile">1. Select Order History File</label>
+                <input type="file" id="ordersFile" accept=".xls,.xlsx">
+            </div>
+            <div class="file-input-box">
+                <label for="sdsFolder">2. Select SDS PDF Folder</label>
+                <input type="file" id="sdsFolder" webkitdirectory directory multiple>
+            </div>
+        </div>
+
+        <div id="search-container">
+            <input type="text" id="searchInput" placeholder="Search by Customer PO...">
+        </div>
+
+        <button id="processButton" onclick="processFiles()" disabled class="button-disabled">Process Files</button>
+        
+        <div id="results-container">
+            <p class="status">Please sign in and select your files to begin.</p>
+        </div>
+    </div>
+
+    <div id="log-container" style="display: none;">
+        <h2>Activity Log</h2>
+        <div id="log-area"></div>
+        <button onclick="downloadLog()" style="margin-top: 10px; width: auto; padding: 8px 12px; font-size: 0.9em;">Download Log</button>
+        <div style="margin-top: 10px;">
+            <input type="checkbox" id="showProcessedCheckbox" onchange="toggleProcessedOrders()">
+            <label for="showProcessedCheckbox">Show Processed Orders</label>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>ADDEV Materials Aerospace B.V.</p>
+    </div>
+
+    <script>
+        // --- START: MSAL CONFIGURATION ---
+        const msalConfig = {
+            auth: {
+                clientId: "8526bd2d-d28b-46c2-8b26-69887f97e0bf",
+                authority: "https://login.microsoftonline.com/3eb0a4e0-e392-46c7-82db-984db1de22f8",
+                redirectUri: window.location.origin,
+            },
+            cache: {
+                cacheLocation: "sessionStorage",
+                storeAuthStateInCookie: false,
+            }
+        };
+
+        const graphScopes = ["user.read", "mail.send"];
+        const myMSALObj = new msal.PublicClientApplication(msalConfig);
+        let accessToken = null;
+        // --- END: MSAL CONFIGURATION ---
+
+        let allOrdersData = null;
+        let sdsFiles = []; // This will store File objects
+        let emailLog = [];
+        let processedOrders = []; // Stores data for the *currently displayed* table
+        let currentManualSdsResults = []; // For manual search
+        let debounceTimer;
+
+        // Event Listeners
+        document.getElementById('ordersFile').addEventListener('change', (e) => handleOrdersFile(e.target.files));
+        // MODIFIED: Changed listener target
+        document.getElementById('sdsFolder').addEventListener('change', (e) => handleSdsFolder(e.target.files));
+        // MODIFIED: Added debounce timer
+        document.getElementById('searchInput').addEventListener('keyup', (e) => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => filterByPO(e.target.value), 300);
+        });
+
+        // --- AUTHENTICATION (Unchanged) ---
+        async function signIn() {
+            const loginRequest = { scopes: graphScopes };
+            try {
+                const loginResponse = await myMSALObj.loginPopup(loginRequest);
+                accessToken = loginResponse.accessToken;
+                console.log("Sign-in successful. Access token acquired.");
+                updateUIForUser(loginResponse.account);
+            } catch (error) {
+                console.error("Login failed:", error);
+                document.getElementById('auth-status').innerText = "Login failed. Please try again.";
+            }
+        }
+
+        function signOut() {
+            myMSALObj.logoutPopup();
+            accessToken = null;
+            updateUIForUser(null);
+        }
+
+        function updateUIForUser(account) {
+            const signInButton = document.getElementById('signInButton');
+            const signOutButton = document.getElementById('signOutButton');
+            const authStatus = document.getElementById('auth-status');
+
+            if (account) {
+                signInButton.style.display = 'none';
+                signOutButton.style.display = 'block';
+                authStatus.innerText = `Signed in as: ${account.name}`;
+            } else {
+                signInButton.style.display = 'block';
+                signOutButton.style.display = 'none';
+                authStatus.innerText = "";
+            }
+            checkFilesStatus();
+        }
+
+
+        // --- FILE HANDLING ---
+        function handleOrdersFile(files) {
+            const file = files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
+                allOrdersData = XLSX.utils.sheet_to_json(workbook.Sheets["Customer_Orders"]);
+                console.log(`Loaded ${allOrdersData.length} total orders.`);
+                if (allOrdersData.length > 0) {
+                    console.log("Detected column headers:", Object.keys(allOrdersData[0]));
+                }
+                checkFilesStatus();
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // MODIFIED: Function to handle folder upload
+        function handleSdsFolder(files) {
+            sdsFiles = [];
+            for (const file of files) {
+                if (file.name.toLowerCase().endsWith('.pdf')) {
+                    sdsFiles.push(file); // Store the actual File object
+                }
+            }
+            // Sort files alphabetically by their relative path for consistent search results
+            sdsFiles.sort((a, b) => a.webkitRelativePath.localeCompare(b.webkitRelativePath));
+            console.log(`${sdsFiles.length} SDS PDF files loaded.`);
+            checkFilesStatus();
+        }
+
+        function checkFilesStatus() {
+            const button = document.getElementById('processButton');
+            // User must be signed in (accessToken is not null) AND both files must be selected
+            if (allOrdersData && sdsFiles.length > 0 && accessToken) {
+                button.disabled = false;
+                button.className = 'button-ready';
+            } else {
+                button.disabled = true;
+                button.className = 'button-disabled';
+            }
+        }
+
+
+        // --- CORE LOGIC (SDS Matching) ---
+        // ADDED: Helper functions from Sales email.html
+        function normalizeString(str) { return str.toLowerCase().replace(/[\s-_]/g, ''); }
+
+        // UPDATED: More comprehensive version
+        function cleanDescription(description) {
+            if (typeof description !== 'string' || !description) return "";
+            const packagingTerms = [
+                "fles 10ml", "release agent spray 12 oz", "can", "bottle", "quart", "tube", "1 gram", "fles",
+                "40 ml. Applicator Pen", "Jerry", "cart 750ml", "Spatulas box 100x3.5gr", "500 gram", "5 liter",
+                "roll 36\" x 100 yd unbleached", "Tin 1 Kg", "Dyed - (#004675) 12 oz", "cartridge", "2 gallon",
+                "resin clear 1 liter", "pint", "6 oz (3.5 oz fill)", "Corrosion Resist Sealant 500 ml kit",
+                "1/2 inch", "400 ml", "gallon", "10kg", "2 Oz Touch up Kit", "25 liter", "pouch 100 wipes", "6 oz",
+                "thinner 0,5 liter", "Activator 1 liter", "Epoxy Primer 4 liter", "155kg drum", "kit", "drum", "pail",
+                "roll", "oz", "ml", "liter", "gram", "spray", "aerosol", "wipes", "pen", "bag", "box", "kit"
+            ];
+            const pattern = new RegExp(`\\s*(${packagingTerms.join('|')}).*`, 'i');
+            let cleaned = description.replace(pattern, '');
+            cleaned = cleaned.replace(/[\/\-_,]+$/, '').trim();
+            return cleaned;
+        }
+        
+        // ADDED:
+        function extractVersionNumber(filename) {
+            const match = filename.match(/_V(\d+)/i);
+            return match ? parseInt(match[1], 10) : 0;
+        }
+        
+        // ADDED:
+        async function getCountryCodeFromGeoNames(placeName) {
+            if (!placeName || typeof placeName !== 'string') return null;
+            const lowerPlaceName = placeName.toLowerCase();
+            // Hardcoded exceptions
+            if (lowerPlaceName.includes('schimatari viotias')) return 'GR';
+            if (lowerPlaceName.includes('sigonella')) return 'IT';
+            if (lowerPlaceName.includes('schiphol oost')) return 'NL';
+            if (lowerPlaceName.includes('dubai airport freezone')) return 'AE';
+            if (lowerPlaceName.includes('kahramankaza')) return 'TR';
+            
+            const cleanedPlaceName = placeName.split(',')[0].trim();
+            // Using a public proxy for CORS issues, replace with your own if needed
+            const url = `https://secure.geonames.org/searchJSON?q=${encodeURIComponent(cleanedPlaceName)}&maxRows=1&username=nielssecoa.nl`;
+            
+            try {
+                // Note: This public API call might fail.
+                const response = await fetch(url);
+                if (!response.ok) return null;
+                const data = await response.json();
+                if (data.geonames && data.geonames.length > 0) {
+                    return data.geonames[0].countryCode;
+                }
+                return null;
+            } catch (error) {
+                console.error("Error calling GeoNames API:", error);
+                return null;
+            }
+        }
+        
+        // ADDED:
+        function getFormattedLandcode(countryCode) {
+            if (!countryCode) return 'N/A';
+            const code = countryCode.toUpperCase();
+            const euCountries = new Set(["AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", "HR", "HU", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK"]);
+            return euCountries.has(code) ? `EU ${code}` : code;
+        }
+
+        // MODIFIED: Advanced matching logic adapted to use File objects
+        function findSdsMatch(originalDesc, countryCode, sdsFileList) {
+            if (!sdsFileList || sdsFileList.length === 0 || !originalDesc) return null;
+            
+            const cleanedDesc = cleanDescription(originalDesc);
+            const normalizedDesc = normalizeString(cleanedDesc);
+            
+            if (!normalizedDesc) {
+                return null;
+            }
+
+            const lowerCountryCode = countryCode ? countryCode.toLowerCase() : '';
+
+            // First, find all possible product matches based on description (using file.name)
+            let productMatches = sdsFileList.filter(file => {
+                const filename = file.name;
+                return normalizeString(filename).includes(normalizedDesc);
+            });
+            
+            if (productMatches.length === 0) {
+                productMatches = sdsFileList.filter(file => {
+                    const filename = file.name.toLowerCase();
+                    let baseName = filename
+                        .replace(/\.pdf$/, '')
+                        .replace(/_v\d+/, '')
+                        .replace(/_(complete|eu|en|nl|de|fr|es|it|gr|tr|ae)_/g, '_')
+                        .replace(/ (complete|eu|en|nl|de|fr|es|it|gr|tr|ae) /g, ' ');
+                    baseName = normalizeString(baseName);
+                    if (baseName.length < 6) return false;
+                    return normalizedDesc.includes(baseName);
+                });
+            }
+
+            if (productMatches.length === 0) return null;
+
+            // Start filtering: first by country, then by fallbacks
+            let potentialMatches = [];
+            if (lowerCountryCode) {
+                const countryMatches = productMatches.filter(file => {
+                    const filename = file.name.toLowerCase();
+                    return filename.includes(` ${lowerCountryCode} `) || filename.includes(`_${lowerCountryCode}_`);
+                });
+                if (countryMatches.length > 0) potentialMatches = countryMatches;
+            }
+            
+            // Fallback logic
+            if (potentialMatches.length === 0) {
+                if (lowerCountryCode === 'be') {
+                    const nlMatches = productMatches.filter(file => {
+                        const filename = file.name.toLowerCase();
+                        return filename.includes(' nl ') || filename.includes('_nl_');
+                    });
+                    if (nlMatches.length > 0) potentialMatches = nlMatches;
+                }
+
+                if (potentialMatches.length === 0) {
+                    const enMatches = productMatches.filter(file => {
+                        const filename = file.name.toLowerCase();
+                        return filename.includes(' en ') || filename.includes('_en_');
+                    });
+                    potentialMatches = enMatches.length > 0 ? enMatches : productMatches;
+                }
+            }
+
+            // From the potential matches, find the best one
+            if (potentialMatches.length > 1) {
+                // Check full path for 'complete'
+                const completeMatch = potentialMatches.find(file => 
+                    file.webkitRelativePath.toLowerCase().includes('complete')
+                );
+                if (completeMatch) {
+                    return completeMatch; // Returns File object
+                }
+                
+                // Sort by version number found in filename
+                potentialMatches.sort((a, b) => extractVersionNumber(b.name) - extractVersionNumber(a.name));
+            }
+            
+            return potentialMatches[0] || null; // Returns File object or null
+        }
+
+        // --- EMAIL GENERATION & SENDING ---
+        async function sendEmail(index) {
+            const order = processedOrders[index];
+            if (!order.toEmail) {
+                alert('Cannot send email: "To Email" field is empty.');
+                return;
+            }
+            if (!order.sdsMatch) {
+                alert('Cannot send email: No SDS file is matched for this order.');
+                return;
+            }
+
+            const button = document.querySelector(`#results-container tr:nth-child(${index + 1}) button`);
+            button.disabled = true;
+            button.innerText = 'Sending...';
+
+            const to = order.toEmail;
+            const cc = order.ccEmail;
+            const subject = `PO# ${order.subject}`;
+            // MODIFIED: Updated email body
+            const body = [
+                "Dear customer,",
+                "\n",
+                "Please find the relevant document(s) for your recent order.",
+                "\n",
+                "Order Details:",
+                `- Your PO#: ${order.subject}`,
+                `- Product: ${order.description}`,
+                `- Our Order#: ${order.orderNumber}`,
+                "\n",
+                "If there are any questions regarding this email or its content, please reply to this e-mail or send a",
+                "e-mail to hse.nl@addevmaterials.com",
+                "\n",
+                "With kind regards,",
+                "ADDEV Materials Aerospace B.V.",
+                "Bunsenstraat 21, 3316 GC, Dordrecht, The Netherlands."
+            ].join('\n');
+
+            try {
+                await sendEmailWithAttachmentViaGraphAPI(to, cc, subject, body, order.sdsMatch);
+
+                const timestamp = new Date().toLocaleString();
+                emailLog.push(`${timestamp} - Email sent to: ${to} for PO# ${order.subject} with attachment: ${order.sdsMatch.name}`);
+                updateLogView();
+
+                // ADDED: Save to localStorage on success
+                const orderKey = `${order.orderNumber}|${order.subject}`;
+                let processed = new Set(JSON.parse(localStorage.getItem('processedOrders')) || []);
+                processed.add(orderKey);
+                localStorage.setItem('processedOrders', JSON.stringify([...processed]));
+
+                const tableRow = document.querySelector(`#results-container tbody tr:nth-child(${index + 1})`);
+                if (tableRow) {
+                    tableRow.classList.add('processed-row');
+                    button.innerText = 'Sent';
+                }
+
+            } catch (error) {
+                console.error("Failed to send email:", error);
+                alert(`Failed to send email: ${error.message}`);
+                button.disabled = false;
+                button.innerText = 'Send Email';
+            }
+        }
+
+        // Unchanged: This function works with File objects, which is correct
+        async function sendEmailWithAttachmentViaGraphAPI(to, cc, subject, body, attachmentFile) {
+            const endpoint = "https://graph.microsoft.com/v1.0/me/sendMail";
+
+            const reader = new FileReader();
+            const fileAsBase64 = await new Promise(resolve => {
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.readAsDataURL(attachmentFile);
+            });
+            
+            const emailMessage = {
+                message: {
+                    subject: subject,
+                    body: {
+                        contentType: "text",
+                        content: body
+                    },
+                    toRecipients: [{ emailAddress: { address: to } }],
+                    attachments: [
+                        {
+                            "@odata.type": "#microsoft.graph.fileAttachment",
+                            "name": attachmentFile.name,
+                            "contentType": attachmentFile.type,
+                            "contentBytes": fileAsBase64
+                        }
+                    ]
+                }
+            };
+
+            if (cc) {
+                emailMessage.message.ccRecipients = [{ emailAddress: { address: cc } }];
+            }
+
+            const response = await fetch(endpoint, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${accessToken}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(emailMessage)
+            });
+
+            if (!response.ok) {
+                throw new Error(`Graph API error: ${response.statusText}`);
+            }
+            console.log("Email sent successfully via Graph API.");
+        }
+
+
+        // --- DISPLAY AND UI LOGIC ---
+        
+        // ADDED: Manual SDS search functions
+        function filterSds(event, orderIndex) {
+            const searchTerm = event.target.value.toLowerCase();
+            const resultsContainer = document.getElementById(`sds-results-${orderIndex}`);
+            if (searchTerm.length < 3) {
+                resultsContainer.innerHTML = '';
+                resultsContainer.style.display = 'none';
+                return;
+            }
+            
+            // Filter the main sdsFiles (File objects) list
+            currentManualSdsResults = sdsFiles.filter(file => 
+                file.webkitRelativePath.toLowerCase().includes(searchTerm)
+            ).slice(0, 15); // Show top 15
+
+            if (currentManualSdsResults.length === 0) {
+                resultsContainer.innerHTML = '<div>No files found</div>';
+            } else {
+                resultsContainer.innerHTML = currentManualSdsResults.map((file, fileIndex) => 
+                    // Pass the index from the filtered list (currentManualSdsResults)
+                    `<div onclick='selectSds(${fileIndex}, ${orderIndex})'>${file.name} (..${file.webkitRelativePath.slice(-50)})</div>`
+                ).join('');
+            }
+            resultsContainer.style.display = 'block';
+        }
+
+        function selectSds(fileIndex, orderIndex) {
+            // Get the actual File object from the filtered results
+            const selectedFile = currentManualSdsResults[fileIndex];
+            if (!selectedFile) return;
+
+            // Update the processedOrders array with the File object
+            processedOrders[orderIndex].sdsMatch = selectedFile;
+            
+            const tableRow = document.querySelector(`#results-container tbody tr:nth-child(${orderIndex + 1})`);
+            // Update the "Matching SDS" cell
+            const matchCell = tableRow.children[5]; // Column 5
+            matchCell.innerHTML = selectedFile.name;
+            matchCell.className = 'sds-match';
+
+            // Enable the "Send Email" button
+            const button = tableRow.querySelector('button');
+            button.disabled = false;
+
+            // Hide the search results
+            document.getElementById(`sds-results-${orderIndex}`).style.display = 'none';
+        }
+
+        // MODIFIED: Updated to use new logic
+        async function displayResults(ordersToProcess) {
+            const container = document.getElementById('results-container');
+            container.innerHTML = `<p class="status" id="progress-status">Processing ${ordersToProcess.length} orders...</p>`;
+            
+            // MODIFIED: Added Landcode column
+            const tableHeader = `<thead><tr><th>Date</th><th>Subject (PO)</th><th>Description</th><th>Ship To</th><th>Landcode</th><th>Matching SDS PDF</th><th>To Email</th><th>CC Email</th><th>Action</th></tr></thead>`;
+            let tableBody = '';
+            processedOrders = []; // Reset the list
+            const totalOrders = ordersToProcess.length;
+
+            for (let i = 0; i < totalOrders; i++) {
+                if (i % 10 === 0) { // Update status every 10 rows
+                    document.getElementById('progress-status').innerText = `Processing... ${i + 1} of ${totalOrders} complete.`;
+                }
+
+                const order = ordersToProcess[i];
+                const shipTo = getValueCaseInsensitive(order, 'Ship To') || 'N/A';
+
+                // Get emails
+                let sdsEmail = (getValueCaseInsensitive(order, 'SDS Email') || '').toString().trim();
+                let buyerEmail = (getValueCaseInsensitive(order, 'Buyer Email') || '').toString().trim();
+                let toEmail = sdsEmail;
+                let ccEmail = buyerEmail;
+                if (!toEmail && buyerEmail) {
+                    toEmail = buyerEmail;
+                    ccEmail = '';
+                }
+
+                // ADDED: Async call for country code
+                const countryCode = await getCountryCodeFromGeoNames(shipTo);
+                const landcode = getFormattedLandcode(countryCode);
+                const description = getValueCaseInsensitive(order, 'Description') || '';
+                
+                // MODIFIED: Use advanced match function
+                const sdsMatch = findSdsMatch(description, countryCode, sdsFiles); // Returns File object or null
+
+                const orderData = {
+                    date: formatDate(getValueCaseInsensitive(order, 'Originally Promised', 'Order Date')),
+                    subject: getValueCaseInsensitive(order, 'Customer PO') || 'N/A',
+                    description: description,
+                    shipTo: shipTo,
+                    landcode: landcode,
+                    toEmail: toEmail,
+                    ccEmail: ccEmail,
+                    orderNumber: getValueCaseInsensitive(order, 'Order Number') || 'N/A',
+                    sdsMatch: sdsMatch // Store the File object
+                };
+                processedOrders.push(orderData);
+
+                let matchCell;
+                if (sdsMatch) {
+                    matchCell = `<td class="sds-match">${sdsMatch.name}</td>`;
+                } else {
+                    // ADDED: Manual search box
+                    const searchInputHTML = `<div class="sds-search-container">
+                        <input type="text" id="sds-search-${i}" onkeyup="filterSds(event, ${i})" placeholder="Search SDS..." autocomplete="off">
+                        <div class="sds-results" id="sds-results-${i}"></div>
+                    </div>`;
+                    matchCell = `<td class="sds-no-match">${searchInputHTML}</td>`;
+                }
+
+                tableBody += `<tr>
+                    <td>${orderData.date}</td>
+                    <td>${orderData.subject}</td>
+                    <td>${orderData.description}</td>
+                    <td>${orderData.shipTo}</td>
+                    <td>${orderData.landcode}</td> ${matchCell}
+                    <td>${orderData.toEmail}</td>
+                    <td>${orderData.ccEmail}</td>
+                    <td><button onclick="sendEmail(${i})" ${!sdsMatch ? 'disabled' : ''}>Send Email</button></td>
+                </tr>`;
+            }
+
+            container.innerHTML = `<table>${tableHeader}<tbody>${tableBody}</tbody></table>`;
+        }
+
+        // MODIFIED: Use getDefaultOrderList
+        function processFiles() {
+            if (!allOrdersData || sdsFiles.length === 0) {
+                alert("Please select both the Orders file and the SDS Folder first.");
+                return;
+            }
+            const defaultOrders = getDefaultOrderList();
+            displayResults(defaultOrders); // Now async
+        }
+        
+        // --- UTILITY FUNCTIONS ---
+        // ADDED:
+        function getValueCaseInsensitive(obj, ...keys) {
+            for (const key of keys) {
+                const lowerKey = key.toLowerCase().trim();
+                for (const objKey in obj) {
+                    if (objKey.toLowerCase().trim() === lowerKey) return obj[objKey];
+                }
+            }
+            return undefined;
+        }
+
+        // ADDED:
+        function formatDate(date) {
+            if (!date || !(date instanceof Date)) return 'N/A';
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+        
+        // ADDED:
+        function getDefaultOrderList() {
+            const showProcessed = document.getElementById('showProcessedCheckbox').checked;
+            let ordersToFilter = allOrdersData;
+
+            if (!showProcessed) {
+                const processedKeys = new Set(JSON.parse(localStorage.getItem('processedOrders')) || []);
+                ordersToFilter = allOrdersData.filter(order => {
+                    const orderKey = `${getValueCaseInsensitive(order, 'Order Number')}|${getValueCaseInsensitive(order, 'Customer PO')}`;
+                    return !processedKeys.has(orderKey);
+                });
+            }
+
+            const today = new Date();
+            const dayOfWeek = today.getDay();
+            const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+            const monday = new Date(today.setDate(diff));
+            monday.setHours(0, 0, 0, 0);
+
+            const upcomingOrders = ordersToFilter.filter(order => {
+                const promisedDate = getValueCaseInsensitive(order, 'Originally Promised');
+                return promisedDate instanceof Date && promisedDate >= monday;
+            });
+
+            upcomingOrders.sort((a, b) => {
+                const dateA = getValueCaseInsensitive(a, 'Originally Promised');
+                const dateB = getValueCaseInsensitive(b, 'Originally Promised');
+                return dateA - dateB;
+            });
+
+            return upcomingOrders.slice(0, 100);
+        }
+
+        // ADDED:
+        function toggleProcessedOrders() {
+            filterByPO(document.getElementById('searchInput').value);
+        }
+
+        // MODIFIED: Advanced filtering
+        function filterByPO(searchTerm) {
+            if (!allOrdersData) return;
+            const lowerSearchTerm = searchTerm.toLowerCase();
+
+            const filteredOrders = lowerSearchTerm 
+                ? allOrdersData.filter(order => {
+                    const po = getValueCaseInsensitive(order, 'Customer PO') || '';
+                    return po.toString().toLowerCase().includes(lowerSearchTerm);
+                  })
+                : getDefaultOrderList(); // Get default list if search is empty
+
+            displayResults(filteredOrders); // Now async
+        }
+        
+        function updateLogView() {
+            document.getElementById('log-container').style.display = 'block';
+            document.getElementById('log-area').textContent = emailLog.join('\n');
+            document.getElementById('log-area').scrollTop = document.getElementById('log-area').scrollHeight;
+        }
+        
+        function downloadLog() {
+            const logContent = emailLog.join('\n');
+            const blob = new Blob([logContent], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `sds_email_log_${new Date().toISOString().slice(0,10)}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+    </script>
+</body>
+</html>
