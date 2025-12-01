@@ -119,12 +119,13 @@
     </div>
 
     <script>
-        // --- START: MSAL CONFIGURATION ---
+       // --- START: MSAL CONFIGURATION ---
         const msalConfig = {
             auth: {
                 clientId: "8526bd2d-d28b-46c2-8b26-69887f97e0bf",
                 authority: "https://login.microsoftonline.com/3eb0a4e0-e392-46c7-82db-984db1de22f8",
-                redirectUri: window.location.origin,
+                // HIERONDER IS AANGEPAST: De exacte link uit Azure Portal
+                redirectUri: "https://nielsheins76-maker.github.io/Sales-email/",
             },
             cache: {
                 cacheLocation: "sessionStorage",
@@ -729,4 +730,5 @@
 
     </script>
 </body>
+
 </html>
