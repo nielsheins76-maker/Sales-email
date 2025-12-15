@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SDS Email Assistant (MS Graph API Version)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://alcdn.msauth.net/browser/2.14.2/js/msal-browser.min.js"></script>
+    <!-- Using MSAL 2.x -->
+    <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
     <style>
-        /* CSS styles mostly unchanged, with additions for manual search */
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 2em; background-color: #f8f9fa; color: #212529; font-size: 14px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
         .container { width: 100%; max-width: 1200px; padding: 2em; background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         h1 { color: #343a40; border-bottom: 2px solid #dee2e6; padding-bottom: 0.5em; text-align: center; }
@@ -36,38 +36,27 @@
         #log-area { height: 150px; overflow-y: auto; background-color: #f8f9fa; border: 1px solid #ced4da; padding: 10px; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
         .footer { margin-top: 2em; text-align: center; color: #6c757d; font-size: 0.9em; }
 
-        /* --- STYLES ADDED FROM SALES EMAIL.HTML --- */
-        .sds-search-container {
-            position: relative;
-        }
-        .sds-search-container input {
-            width: 100%;
-            box-sizing: border-box;
-        }
-        .sds-results {
+        /* Error Box Styles */
+        .error-box {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            padding: 15px;
+            margin-top: 15px;
+            border-radius: 5px;
             display: none;
-            position: absolute;
-            width: 100%;
-            max-height: 200px;
-            overflow-y: auto;
-            border: 1px solid #ccc;
-            background-color: white;
-            z-index: 100;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            font-size: 13px;
+            text-align: left;
+            white-space: pre-line; /* Handle newlines nicely */
         }
-        .sds-results div {
-            padding: 5px;
-            cursor: pointer;
-            border-bottom: 1px solid #eee;
-            font-size: 11px;
-            color: #212529;
-        }
-        .sds-results div:hover {
-            background-color: #e9ecef;
-        }
-        .sds-results div:last-child {
-            border-bottom: none;
-        }
+        .error-title { font-weight: bold; font-size: 1.1em; display: block; margin-bottom: 5px; }
+
+        .sds-search-container { position: relative; }
+        .sds-search-container input { width: 100%; box-sizing: border-box; }
+        .sds-results { display: none; position: absolute; width: 100%; max-height: 200px; overflow-y: auto; border: 1px solid #ccc; background-color: white; z-index: 100; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .sds-results div { padding: 5px; cursor: pointer; border-bottom: 1px solid #eee; font-size: 11px; color: #212529; }
+        .sds-results div:hover { background-color: #e9ecef; }
+        .sds-results div:last-child { border-bottom: none; }
     </style>
 </head>
 <body>
@@ -80,6 +69,7 @@
             <button id="signInButton" onclick="signIn()" class="button-primary">Sign In with Microsoft</button>
             <button id="signOutButton" onclick="signOut()" class="button-primary" style="display: none;">Sign Out</button>
             <p id="auth-status" class="status"></p>
+            <div id="auth-error-details" class="error-box"></div>
         </div>
 
         <div class="file-upload-area">
@@ -123,9 +113,14 @@
         const msalConfig = {
             auth: {
                 clientId: "8526bd2d-d28b-46c2-8b26-69887f97e0bf",
-                authority: "https://login.microsoftonline.com/3eb0a4e0-e392-46c7-82db-984db1de22f8",
-                // HIERONDER IS AANGEPAST: De exacte link uit Azure Portal
-                redirectUri: "https://nielsheins76-maker.github.io/Sales-email/",
+                // This authority is for a SPECIFIC Tenant (Single Tenant)
+                // Only users IN this organization can login. Personal MS accounts will fail.
+                authority: "https://login.microsoftonline.com/3eb0a4e0-e392-46c7-82db-984db1de22f8", 
+                
+                // Redirect URI Validation:
+                // If running on GitHub, uses the hardcoded GitHub URL.
+                // If running locally, you might want to switch this to your localhost URL.
+                redirectUri: "https://nielsheins76-maker.github.io/Sales-email/", 
             },
             cache: {
                 cacheLocation: "sessionStorage",
@@ -134,43 +129,104 @@
         };
 
         const graphScopes = ["user.read", "mail.send"];
-        const myMSALObj = new msal.PublicClientApplication(msalConfig);
+        let myMSALObj;
         let accessToken = null;
-        // --- END: MSAL CONFIGURATION ---
 
+        // Initialize MSAL
+        try {
+            myMSALObj = new msal.PublicClientApplication(msalConfig);
+        } catch (e) {
+            document.getElementById('auth-error-details').style.display = 'block';
+            document.getElementById('auth-error-details').innerText = "Critical Error Initializing MSAL: " + e.message;
+            console.error(e);
+        }
+        
         let allOrdersData = null;
-        let sdsFiles = []; // This will store File objects
+        let sdsFiles = [];
         let emailLog = [];
-        let processedOrders = []; // Stores data for the *currently displayed* table
-        let currentManualSdsResults = []; // For manual search
+        let processedOrders = [];
+        let currentManualSdsResults = [];
         let debounceTimer;
 
         // Event Listeners
         document.getElementById('ordersFile').addEventListener('change', (e) => handleOrdersFile(e.target.files));
-        // MODIFIED: Changed listener target
         document.getElementById('sdsFolder').addEventListener('change', (e) => handleSdsFolder(e.target.files));
-        // MODIFIED: Added debounce timer
         document.getElementById('searchInput').addEventListener('keyup', (e) => {
             clearTimeout(debounceTimer);
             debounceTimer = setTimeout(() => filterByPO(e.target.value), 300);
         });
 
-        // --- AUTHENTICATION (Unchanged) ---
+        // --- AUTHENTICATION ---
         async function signIn() {
+            const errorBox = document.getElementById('auth-error-details');
+            errorBox.style.display = 'none';
+            errorBox.innerText = '';
+            
             const loginRequest = { scopes: graphScopes };
+
             try {
+                // Try popup login
                 const loginResponse = await myMSALObj.loginPopup(loginRequest);
-                accessToken = loginResponse.accessToken;
-                console.log("Sign-in successful. Access token acquired.");
-                updateUIForUser(loginResponse.account);
+                handleResponse(loginResponse);
             } catch (error) {
                 console.error("Login failed:", error);
-                document.getElementById('auth-status').innerText = "Login failed. Please try again.";
+                
+                let errorTitle = "Authentication Failed";
+                let errorMessage = "";
+                
+                // --- ERROR DIAGNOSIS ---
+                
+                // 1. Redirect URI Mismatch (Common on GitHub/Localhost)
+                if (error.errorCode === "redirect_uri_mismatch" || (error.message && error.message.includes("AADSTS50011"))) {
+                    errorTitle = "Configuration Mismatch (Redirect URI)";
+                    errorMessage = `The URL in your code does not match the URL registered in Azure.
+                    
+                    Expected by Code: ${msalConfig.auth.redirectUri}
+                    Current Browser URL: ${window.location.href}
+                    
+                    Fix: Ensure the 'redirectUri' in the code matches exactly what is in the Azure Portal (including http/https and trailing slashes).`;
+                } 
+                // 2. Tenant Mismatch (Wrong Account Type)
+                else if (error.message && error.message.includes("AADSTS50020")) {
+                    errorTitle = "Wrong Account Type (Tenant Error)";
+                    errorMessage = `You are trying to sign in with an account that does not belong to this organization.
+                    
+                    Your app is configured as "Single Tenant" (ID: 3eb0a4e0...).
+                    - You CANNOT use personal accounts (outlook.com, hotmail.com).
+                    - You CANNOT use accounts from other companies unless added as a Guest.
+                    
+                    Fix: Sign in with your corporate 'ADDEV Materials' account.`;
+                }
+                // 3. Popup Blocked
+                else if (error.name === "BrowserAuthError" && error.errorCode === "popup_window_error") {
+                    errorTitle = "Popup Blocked";
+                    errorMessage = "The login popup was blocked by your browser. Please look for the 'Popup Blocked' icon in your address bar and allow popups for this site.";
+                } 
+                // 4. Generic Fallback
+                else {
+                    errorMessage = error.message || JSON.stringify(error);
+                }
+
+                document.getElementById('auth-status').innerText = "Login failed.";
+                errorBox.style.display = 'block';
+                errorBox.innerHTML = `<span class="error-title">${errorTitle}</span>${errorMessage}`;
+            }
+        }
+
+        function handleResponse(response) {
+            if (response !== null) {
+                accessToken = response.accessToken;
+                console.log("Sign-in successful. Access token acquired.");
+                updateUIForUser(response.account);
+                document.getElementById('auth-error-details').style.display = 'none';
             }
         }
 
         function signOut() {
-            myMSALObj.logoutPopup();
+            const logoutRequest = {
+                account: myMSALObj.getAccountByHomeId(myMSALObj.getAllAccounts()[0].homeAccountId)
+            };
+            myMSALObj.logoutPopup(logoutRequest);
             accessToken = null;
             updateUIForUser(null);
         }
@@ -183,11 +239,13 @@
             if (account) {
                 signInButton.style.display = 'none';
                 signOutButton.style.display = 'block';
-                authStatus.innerText = `Signed in as: ${account.name}`;
+                authStatus.innerText = `Signed in as: ${account.name} (${account.username})`;
+                authStatus.style.color = '#28a745';
             } else {
                 signInButton.style.display = 'block';
                 signOutButton.style.display = 'none';
                 authStatus.innerText = "";
+                authStatus.style.color = '#6c757d';
             }
             checkFilesStatus();
         }
@@ -199,26 +257,31 @@
             if (!file) return;
             const reader = new FileReader();
             reader.onload = (e) => {
-                const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
-                allOrdersData = XLSX.utils.sheet_to_json(workbook.Sheets["Customer_Orders"]);
-                console.log(`Loaded ${allOrdersData.length} total orders.`);
-                if (allOrdersData.length > 0) {
-                    console.log("Detected column headers:", Object.keys(allOrdersData[0]));
+                try {
+                    const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
+                    // Try to find the correct sheet
+                    let sheetName = workbook.SheetNames.find(n => n.toLowerCase().includes('order')) || workbook.SheetNames[0];
+                    allOrdersData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+                    console.log(`Loaded ${allOrdersData.length} total orders from sheet: ${sheetName}`);
+                    
+                    if (allOrdersData.length > 0) {
+                        console.log("Detected column headers:", Object.keys(allOrdersData[0]));
+                    }
+                    checkFilesStatus();
+                } catch (err) {
+                    alert("Error reading Excel file: " + err.message);
                 }
-                checkFilesStatus();
             };
             reader.readAsArrayBuffer(file);
         }
 
-        // MODIFIED: Function to handle folder upload
         function handleSdsFolder(files) {
             sdsFiles = [];
             for (const file of files) {
                 if (file.name.toLowerCase().endsWith('.pdf')) {
-                    sdsFiles.push(file); // Store the actual File object
+                    sdsFiles.push(file); 
                 }
             }
-            // Sort files alphabetically by their relative path for consistent search results
             sdsFiles.sort((a, b) => a.webkitRelativePath.localeCompare(b.webkitRelativePath));
             console.log(`${sdsFiles.length} SDS PDF files loaded.`);
             checkFilesStatus();
@@ -226,22 +289,33 @@
 
         function checkFilesStatus() {
             const button = document.getElementById('processButton');
-            // User must be signed in (accessToken is not null) AND both files must be selected
-            if (allOrdersData && sdsFiles.length > 0 && accessToken) {
-                button.disabled = false;
-                button.className = 'button-ready';
+            const statusContainer = document.querySelector('#results-container .status');
+            
+            // Allow processing even without login (just disable sending emails later), 
+            // OR enforce login now. The original code enforced login to process.
+            if (allOrdersData && sdsFiles.length > 0) {
+                 if (accessToken) {
+                    button.disabled = false;
+                    button.className = 'button-ready';
+                    button.innerText = "Process Files";
+                 } else {
+                    button.disabled = true;
+                    button.className = 'button-disabled';
+                    button.innerText = "Sign In Required to Process";
+                 }
             } else {
                 button.disabled = true;
                 button.className = 'button-disabled';
+                if(!allOrdersData && sdsFiles.length === 0) button.innerText = "Select Files to Begin";
+                else if(!allOrdersData) button.innerText = "Select Order File";
+                else button.innerText = "Select SDS Folder";
             }
         }
 
 
         // --- CORE LOGIC (SDS Matching) ---
-        // ADDED: Helper functions from Sales email.html
         function normalizeString(str) { return str.toLowerCase().replace(/[\s-_]/g, ''); }
 
-        // UPDATED: More comprehensive version
         function cleanDescription(description) {
             if (typeof description !== 'string' || !description) return "";
             const packagingTerms = [
@@ -259,13 +333,11 @@
             return cleaned;
         }
         
-        // ADDED:
         function extractVersionNumber(filename) {
             const match = filename.match(/_V(\d+)/i);
             return match ? parseInt(match[1], 10) : 0;
         }
         
-        // ADDED:
         async function getCountryCodeFromGeoNames(placeName) {
             if (!placeName || typeof placeName !== 'string') return null;
             const lowerPlaceName = placeName.toLowerCase();
@@ -277,11 +349,11 @@
             if (lowerPlaceName.includes('kahramankaza')) return 'TR';
             
             const cleanedPlaceName = placeName.split(',')[0].trim();
-            // Using a public proxy for CORS issues, replace with your own if needed
+            // NOTE: This public username 'nielssecoa.nl' might hit rate limits. 
+            // If it fails, we just return null and fallback to defaults.
             const url = `https://secure.geonames.org/searchJSON?q=${encodeURIComponent(cleanedPlaceName)}&maxRows=1&username=nielssecoa.nl`;
             
             try {
-                // Note: This public API call might fail.
                 const response = await fetch(url);
                 if (!response.ok) return null;
                 const data = await response.json();
@@ -290,12 +362,11 @@
                 }
                 return null;
             } catch (error) {
-                console.error("Error calling GeoNames API:", error);
+                console.warn("GeoNames API check failed (non-critical):", error);
                 return null;
             }
         }
         
-        // ADDED:
         function getFormattedLandcode(countryCode) {
             if (!countryCode) return 'N/A';
             const code = countryCode.toUpperCase();
@@ -303,25 +374,22 @@
             return euCountries.has(code) ? `EU ${code}` : code;
         }
 
-        // MODIFIED: Advanced matching logic adapted to use File objects
         function findSdsMatch(originalDesc, countryCode, sdsFileList) {
             if (!sdsFileList || sdsFileList.length === 0 || !originalDesc) return null;
             
             const cleanedDesc = cleanDescription(originalDesc);
             const normalizedDesc = normalizeString(cleanedDesc);
             
-            if (!normalizedDesc) {
-                return null;
-            }
+            if (!normalizedDesc) return null;
 
             const lowerCountryCode = countryCode ? countryCode.toLowerCase() : '';
 
-            // First, find all possible product matches based on description (using file.name)
+            // 1. Direct match on filename
             let productMatches = sdsFileList.filter(file => {
-                const filename = file.name;
-                return normalizeString(filename).includes(normalizedDesc);
+                return normalizeString(file.name).includes(normalizedDesc);
             });
             
+            // 2. Loose match (if no direct match)
             if (productMatches.length === 0) {
                 productMatches = sdsFileList.filter(file => {
                     const filename = file.name.toLowerCase();
@@ -338,7 +406,7 @@
 
             if (productMatches.length === 0) return null;
 
-            // Start filtering: first by country, then by fallbacks
+            // 3. Filter by country code
             let potentialMatches = [];
             if (lowerCountryCode) {
                 const countryMatches = productMatches.filter(file => {
@@ -348,7 +416,7 @@
                 if (countryMatches.length > 0) potentialMatches = countryMatches;
             }
             
-            // Fallback logic
+            // 4. Fallback Logic (BE -> NL, then EN)
             if (potentialMatches.length === 0) {
                 if (lowerCountryCode === 'be') {
                     const nlMatches = productMatches.filter(file => {
@@ -367,21 +435,17 @@
                 }
             }
 
-            // From the potential matches, find the best one
+            // 5. Select best match (latest version or 'complete')
             if (potentialMatches.length > 1) {
-                // Check full path for 'complete'
                 const completeMatch = potentialMatches.find(file => 
                     file.webkitRelativePath.toLowerCase().includes('complete')
                 );
-                if (completeMatch) {
-                    return completeMatch; // Returns File object
-                }
+                if (completeMatch) return completeMatch;
                 
-                // Sort by version number found in filename
                 potentialMatches.sort((a, b) => extractVersionNumber(b.name) - extractVersionNumber(a.name));
             }
             
-            return potentialMatches[0] || null; // Returns File object or null
+            return potentialMatches[0] || null;
         }
 
         // --- EMAIL GENERATION & SENDING ---
@@ -397,13 +461,13 @@
             }
 
             const button = document.querySelector(`#results-container tr:nth-child(${index + 1}) button`);
+            const originalText = button.innerText;
             button.disabled = true;
             button.innerText = 'Sending...';
 
             const to = order.toEmail;
             const cc = order.ccEmail;
             const subject = `PO# ${order.subject}`;
-            // MODIFIED: Updated email body
             const body = [
                 "Dear customer,",
                 "\n",
@@ -429,7 +493,7 @@
                 emailLog.push(`${timestamp} - Email sent to: ${to} for PO# ${order.subject} with attachment: ${order.sdsMatch.name}`);
                 updateLogView();
 
-                // ADDED: Save to localStorage on success
+                // Save to localStorage
                 const orderKey = `${order.orderNumber}|${order.subject}`;
                 let processed = new Set(JSON.parse(localStorage.getItem('processedOrders')) || []);
                 processed.add(orderKey);
@@ -443,19 +507,26 @@
 
             } catch (error) {
                 console.error("Failed to send email:", error);
-                alert(`Failed to send email: ${error.message}`);
+                // Handle specific Token expired errors
+                if (error.message.includes("Access token is empty") || error.statusCode === 401) {
+                     alert("Your session has expired. Please sign out and sign in again.");
+                } else {
+                     alert(`Failed to send email: ${error.message}`);
+                }
                 button.disabled = false;
-                button.innerText = 'Send Email';
+                button.innerText = originalText;
             }
         }
 
-        // Unchanged: This function works with File objects, which is correct
         async function sendEmailWithAttachmentViaGraphAPI(to, cc, subject, body, attachmentFile) {
+            if (!accessToken) throw new Error("Access token is empty. Please sign in.");
+
             const endpoint = "https://graph.microsoft.com/v1.0/me/sendMail";
 
             const reader = new FileReader();
-            const fileAsBase64 = await new Promise(resolve => {
+            const fileAsBase64 = await new Promise((resolve, reject) => {
                 reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = error => reject(error);
                 reader.readAsDataURL(attachmentFile);
             });
             
@@ -471,7 +542,7 @@
                         {
                             "@odata.type": "#microsoft.graph.fileAttachment",
                             "name": attachmentFile.name,
-                            "contentType": attachmentFile.type,
+                            "contentType": attachmentFile.type || "application/pdf",
                             "contentBytes": fileAsBase64
                         }
                     ]
@@ -492,15 +563,15 @@
             });
 
             if (!response.ok) {
-                throw new Error(`Graph API error: ${response.statusText}`);
+                const errorData = await response.json();
+                console.error("Graph API Error Details:", errorData);
+                throw new Error(errorData.error ? errorData.error.message : response.statusText);
             }
             console.log("Email sent successfully via Graph API.");
         }
 
 
         // --- DISPLAY AND UI LOGIC ---
-        
-        // ADDED: Manual SDS search functions
         function filterSds(event, orderIndex) {
             const searchTerm = event.target.value.toLowerCase();
             const resultsContainer = document.getElementById(`sds-results-${orderIndex}`);
@@ -510,16 +581,14 @@
                 return;
             }
             
-            // Filter the main sdsFiles (File objects) list
             currentManualSdsResults = sdsFiles.filter(file => 
                 file.webkitRelativePath.toLowerCase().includes(searchTerm)
-            ).slice(0, 15); // Show top 15
+            ).slice(0, 15);
 
             if (currentManualSdsResults.length === 0) {
                 resultsContainer.innerHTML = '<div>No files found</div>';
             } else {
                 resultsContainer.innerHTML = currentManualSdsResults.map((file, fileIndex) => 
-                    // Pass the index from the filtered list (currentManualSdsResults)
                     `<div onclick='selectSds(${fileIndex}, ${orderIndex})'>${file.name} (..${file.webkitRelativePath.slice(-50)})</div>`
                 ).join('');
             }
@@ -527,47 +596,39 @@
         }
 
         function selectSds(fileIndex, orderIndex) {
-            // Get the actual File object from the filtered results
             const selectedFile = currentManualSdsResults[fileIndex];
             if (!selectedFile) return;
 
-            // Update the processedOrders array with the File object
             processedOrders[orderIndex].sdsMatch = selectedFile;
             
             const tableRow = document.querySelector(`#results-container tbody tr:nth-child(${orderIndex + 1})`);
-            // Update the "Matching SDS" cell
             const matchCell = tableRow.children[5]; // Column 5
             matchCell.innerHTML = selectedFile.name;
             matchCell.className = 'sds-match';
 
-            // Enable the "Send Email" button
             const button = tableRow.querySelector('button');
             button.disabled = false;
 
-            // Hide the search results
             document.getElementById(`sds-results-${orderIndex}`).style.display = 'none';
         }
 
-        // MODIFIED: Updated to use new logic
         async function displayResults(ordersToProcess) {
             const container = document.getElementById('results-container');
             container.innerHTML = `<p class="status" id="progress-status">Processing ${ordersToProcess.length} orders...</p>`;
             
-            // MODIFIED: Added Landcode column
             const tableHeader = `<thead><tr><th>Date</th><th>Subject (PO)</th><th>Description</th><th>Ship To</th><th>Landcode</th><th>Matching SDS PDF</th><th>To Email</th><th>CC Email</th><th>Action</th></tr></thead>`;
             let tableBody = '';
-            processedOrders = []; // Reset the list
+            processedOrders = []; 
             const totalOrders = ordersToProcess.length;
 
             for (let i = 0; i < totalOrders; i++) {
-                if (i % 10 === 0) { // Update status every 10 rows
+                if (i % 10 === 0) {
                     document.getElementById('progress-status').innerText = `Processing... ${i + 1} of ${totalOrders} complete.`;
                 }
 
                 const order = ordersToProcess[i];
                 const shipTo = getValueCaseInsensitive(order, 'Ship To') || 'N/A';
 
-                // Get emails
                 let sdsEmail = (getValueCaseInsensitive(order, 'SDS Email') || '').toString().trim();
                 let buyerEmail = (getValueCaseInsensitive(order, 'Buyer Email') || '').toString().trim();
                 let toEmail = sdsEmail;
@@ -577,13 +638,11 @@
                     ccEmail = '';
                 }
 
-                // ADDED: Async call for country code
                 const countryCode = await getCountryCodeFromGeoNames(shipTo);
                 const landcode = getFormattedLandcode(countryCode);
                 const description = getValueCaseInsensitive(order, 'Description') || '';
                 
-                // MODIFIED: Use advanced match function
-                const sdsMatch = findSdsMatch(description, countryCode, sdsFiles); // Returns File object or null
+                const sdsMatch = findSdsMatch(description, countryCode, sdsFiles);
 
                 const orderData = {
                     date: formatDate(getValueCaseInsensitive(order, 'Originally Promised', 'Order Date')),
@@ -594,7 +653,7 @@
                     toEmail: toEmail,
                     ccEmail: ccEmail,
                     orderNumber: getValueCaseInsensitive(order, 'Order Number') || 'N/A',
-                    sdsMatch: sdsMatch // Store the File object
+                    sdsMatch: sdsMatch 
                 };
                 processedOrders.push(orderData);
 
@@ -602,7 +661,6 @@
                 if (sdsMatch) {
                     matchCell = `<td class="sds-match">${sdsMatch.name}</td>`;
                 } else {
-                    // ADDED: Manual search box
                     const searchInputHTML = `<div class="sds-search-container">
                         <input type="text" id="sds-search-${i}" onkeyup="filterSds(event, ${i})" placeholder="Search SDS..." autocomplete="off">
                         <div class="sds-results" id="sds-results-${i}"></div>
@@ -625,18 +683,16 @@
             container.innerHTML = `<table>${tableHeader}<tbody>${tableBody}</tbody></table>`;
         }
 
-        // MODIFIED: Use getDefaultOrderList
         function processFiles() {
             if (!allOrdersData || sdsFiles.length === 0) {
                 alert("Please select both the Orders file and the SDS Folder first.");
                 return;
             }
             const defaultOrders = getDefaultOrderList();
-            displayResults(defaultOrders); // Now async
+            displayResults(defaultOrders);
         }
         
         // --- UTILITY FUNCTIONS ---
-        // ADDED:
         function getValueCaseInsensitive(obj, ...keys) {
             for (const key of keys) {
                 const lowerKey = key.toLowerCase().trim();
@@ -647,7 +703,6 @@
             return undefined;
         }
 
-        // ADDED:
         function formatDate(date) {
             if (!date || !(date instanceof Date)) return 'N/A';
             const year = date.getFullYear();
@@ -656,7 +711,6 @@
             return `${year}-${month}-${day}`;
         }
         
-        // ADDED:
         function getDefaultOrderList() {
             const showProcessed = document.getElementById('showProcessedCheckbox').checked;
             let ordersToFilter = allOrdersData;
@@ -689,12 +743,10 @@
             return upcomingOrders.slice(0, 100);
         }
 
-        // ADDED:
         function toggleProcessedOrders() {
             filterByPO(document.getElementById('searchInput').value);
         }
 
-        // MODIFIED: Advanced filtering
         function filterByPO(searchTerm) {
             if (!allOrdersData) return;
             const lowerSearchTerm = searchTerm.toLowerCase();
@@ -704,9 +756,9 @@
                     const po = getValueCaseInsensitive(order, 'Customer PO') || '';
                     return po.toString().toLowerCase().includes(lowerSearchTerm);
                   })
-                : getDefaultOrderList(); // Get default list if search is empty
+                : getDefaultOrderList();
 
-            displayResults(filteredOrders); // Now async
+            displayResults(filteredOrders); 
         }
         
         function updateLogView() {
@@ -728,7 +780,14 @@
             URL.revokeObjectURL(url);
         }
 
+        // Try to check for existing session on load
+        if(myMSALObj) {
+            const currentAccounts = myMSALObj.getAllAccounts();
+            if (currentAccounts.length > 0) {
+                myMSALObj.setActiveAccount(currentAccounts[0]);
+                updateUIForUser(currentAccounts[0]);
+            }
+        }
     </script>
 </body>
-
 </html>
