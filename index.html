@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SDS Email Assistant (Debug Version)</title>
+    <title>SDS Email Assistant (Auto-Detect Mode)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
     <style>
@@ -11,17 +11,27 @@
         .container { width: 100%; max-width: 1200px; padding: 2em; background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         h1 { color: #343a40; border-bottom: 2px solid #dee2e6; padding-bottom: 0.5em; text-align: center; }
         
-        /* Debug Box Styles */
-        .debug-box {
-            background-color: #fff3cd;
-            color: #856404;
-            border: 1px solid #ffeeba;
+        /* Config Box Styles */
+        .config-box {
+            background-color: #e8f4fd;
+            color: #0c5460;
+            border: 2px solid #b8daff;
             padding: 15px;
             margin-bottom: 20px;
-            border-radius: 5px;
+            border-radius: 8px;
+            text-align: left;
+            font-size: 14px;
+        }
+        .config-code {
+            display: block;
+            background: #fff;
+            padding: 8px;
+            border: 1px solid #d6d8db;
+            border-radius: 4px;
             font-family: monospace;
-            font-size: 12px;
-            white-space: pre-wrap;
+            margin-top: 5px;
+            font-weight: bold;
+            color: #d63384;
             word-break: break-all;
         }
 
@@ -42,21 +52,29 @@
         /* Standard Styles */
         .file-upload-area { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
         .file-input-box { padding: 20px; border: 2px dashed #ced4da; border-radius: 8px; background-color: #f8f9fa; text-align: center; }
-        input[type="file"] { width: 100%; padding: 8px; margin-top: 10px; }
-        button { display: block; width: 100%; padding: 12px; font-size: 1em; font-weight: bold; cursor: pointer; color: white; border: none; border-radius: 5px; margin-top: 10px; }
+        .file-input-box label { font-weight: bold; margin-bottom: 5px; display: block; font-size: 1.1em; }
+        input[type="file"] { width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; margin-top: 10px; }
+        #search-container { margin-bottom: 20px; }
+        #searchInput { width: 100%; padding: 10px; font-size: 1em; border: 1px solid #ced4da; border-radius: 5px; }
+        button { display: block; width: 100%; padding: 12px; font-size: 1em; font-weight: bold; cursor: pointer; color: white; border: none; border-radius: 5px; transition: background-color 0.3s; margin-top: 10px; }
         .button-disabled { background-color: #6c757d; cursor: not-allowed; }
         .button-ready { background-color: #28a745; }
         .button-primary { background-color: #007bff; }
         .button-primary:hover { background-color: #0056b3; }
+        .button-ready:hover { background-color: #218838; }
         #results-container { margin-top: 20px; }
         table { border-collapse: collapse; width: 100%; margin-top: 1em; }
-        th, td { border: 1px solid #dee2e6; text-align: left; padding: 8px; font-size: 12px; }
-        th { background-color: #e9ecef; }
+        th, td { border: 1px solid #dee2e6; text-align: left; padding: 8px; vertical-align: top; word-break: break-word; font-size: 12px; }
+        th { background-color: #e9ecef; position: sticky; top: 0; }
+        tr:nth-child(even) { background-color: #f8f9fa; }
+        .status { font-style: italic; color: #6c757d; text-align: center; padding: 1em; }
         .sds-match { color: #28a745; font-weight: bold; }
         .sds-no-match { color: #dc3545; }
+        .processed-row { background-color: #d4edda; color: #155724; }
+        #log-container { width: 100%; max-width: 1200px; margin-top: 20px; padding: 15px; border: 1px solid #dee2e6; border-radius: 8px; background-color: #ffffff; }
+        #log-area { height: 150px; overflow-y: auto; background-color: #f8f9fa; border: 1px solid #ced4da; padding: 10px; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
         .footer { margin-top: 2em; text-align: center; color: #6c757d; font-size: 0.9em; }
-        
-        /* Search dropdown styles */
+
         .sds-search-container { position: relative; }
         .sds-search-container input { width: 100%; box-sizing: border-box; }
         .sds-results { display: none; position: absolute; width: 100%; max-height: 200px; overflow-y: auto; border: 1px solid #ccc; background-color: white; z-index: 100; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
@@ -69,12 +87,13 @@
     <div class="container">
         <h1>SDS Email Assistant</h1>
         
-        <!-- DIAGNOSTIC PANEL -->
-        <div id="diagnostic-panel" class="debug-box">
-            <strong>System Diagnostics:</strong><br>
-            Current URL: <span id="current-url">Loading...</span><br>
-            Protocol: <span id="current-protocol">Loading...</span><br>
-            Status: <span id="env-status">Checking...</span>
+        <!-- AUTO-DETECT CONFIG PANEL -->
+        <div id="config-panel" class="config-box">
+            <strong>Azure Configuration Check:</strong><br>
+            To avoid login errors, please ensure the following URL is added to your 
+            <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank">Azure Portal</a> 
+            under <strong>Authentication</strong> > <strong>Redirect URIs</strong> (Single-page application):
+            <span id="detected-uri" class="config-code">Detecting...</span>
         </div>
 
         <div id="auth-container">
@@ -101,12 +120,19 @@
 
         <button id="processButton" onclick="processFiles()" disabled class="button-disabled">Process Files</button>
         
-        <div id="results-container"></div>
+        <div id="results-container">
+            <p class="status">Please sign in and select your files to begin.</p>
+        </div>
     </div>
 
-    <div id="log-container" style="display: none; margin-top: 20px; padding: 15px; border: 1px solid #dee2e6;">
+    <div id="log-container" style="display: none;">
         <h2>Activity Log</h2>
-        <div id="log-area" style="height: 150px; overflow-y: auto; background-color: #f8f9fa; border: 1px solid #ced4da; padding: 10px; font-family: monospace;"></div>
+        <div id="log-area"></div>
+        <button onclick="downloadLog()" style="margin-top: 10px; width: auto; padding: 8px 12px; font-size: 0.9em;">Download Log</button>
+        <div style="margin-top: 10px;">
+            <input type="checkbox" id="showProcessedCheckbox" onchange="toggleProcessedOrders()">
+            <label for="showProcessedCheckbox">Show Processed Orders</label>
+        </div>
     </div>
 
     <div class="footer">
@@ -114,39 +140,23 @@
     </div>
 
     <script>
-        // --- DIAGNOSTICS RUN ON LOAD ---
-        window.onload = function() {
-            const currentUrl = window.location.href;
-            const protocol = window.location.protocol;
-            document.getElementById('current-url').textContent = currentUrl;
-            document.getElementById('current-protocol').textContent = protocol;
-
-            const statusEl = document.getElementById('env-status');
-            if (protocol === 'file:') {
-                statusEl.innerHTML = "❌ CRITICAL ERROR: Running from file system. MSAL Authentication will NOT work. You must run this via a local server (http://localhost) or GitHub Pages (https://...).";
-                statusEl.style.color = "red";
-                statusEl.style.fontWeight = "bold";
-                document.getElementById('signInButton').disabled = true;
-                document.getElementById('signInButton').innerText = "Cannot Sign In (File Protocol)";
-            } else if (protocol === 'http:' && !currentUrl.includes('localhost')) {
-                statusEl.innerHTML = "⚠️ WARNING: Running on HTTP (Non-Secure). MSAL usually requires HTTPS unless on localhost.";
-            } else {
-                statusEl.innerHTML = "✅ Environment looks OK (HTTPS/Localhost). Check Azure Config next.";
-                statusEl.style.color = "green";
-            }
-        };
+        // --- AUTO-DETECT REDIRECT URI ---
+        // We calculate the exact URL of the current page to ensure it matches the browser
+        const currentRedirectUri = window.location.href.split('?')[0].split('#')[0];
+        
+        // Display it to the user
+        document.getElementById('detected-uri').textContent = currentRedirectUri;
 
         // --- MSAL CONFIGURATION ---
-        // IMPORTANT: Verify these values against your Azure Portal
         const msalConfig = {
             auth: {
                 clientId: "8526bd2d-d28b-46c2-8b26-69887f97e0bf",
-                authority: "https://login.microsoftonline.com/3eb0a4e0-e392-46c7-82db-984db1de22f8", 
-                redirectUri: "https://nielsheins76-maker.github.io/Sales-email/", 
+                authority: "https://login.microsoftonline.com/3eb0a4e0-e392-46c7-82db-984db1de22f8", // Specific Tenant
+                redirectUri: currentRedirectUri, // USE THE DETECTED URI
             },
             cache: {
-                cacheLocation: "sessionStorage", 
-                storeAuthStateInCookie: false, 
+                cacheLocation: "sessionStorage",
+                storeAuthStateInCookie: false,
             }
         };
 
@@ -154,6 +164,7 @@
         let myMSALObj;
         let accessToken = null;
 
+        // Initialize MSAL
         try {
             myMSALObj = new msal.PublicClientApplication(msalConfig);
         } catch (e) {
@@ -162,35 +173,29 @@
         
         // --- AUTHENTICATION LOGIC ---
         async function signIn() {
-            // Clear previous errors
             document.getElementById('auth-error-details').style.display = 'none';
-            document.getElementById('auth-status').innerText = "Attempting login...";
-
+            
             const loginRequest = { 
                 scopes: graphScopes,
-                prompt: "select_account" // Forces account selection to avoid stuck sessions
+                prompt: "select_account"
             };
 
             try {
                 const loginResponse = await myMSALObj.loginPopup(loginRequest);
                 handleResponse(loginResponse);
             } catch (error) {
-                console.error("FULL LOGIN ERROR OBJECT:", error); // Check Console for this!
+                console.error("LOGIN ERROR:", error);
                 
                 let title = "Login Failed";
                 let msg = error.message || JSON.stringify(error);
                 let solution = "";
 
-                // Analyze Error
                 if (error.errorCode === "redirect_uri_mismatch" || msg.includes("AADSTS50011")) {
                     title = "Redirect URI Mismatch";
-                    solution = `1. Go to Azure Portal > Authentication.\n2. Ensure this EXACT URL is added:\n   ${window.location.href}\n3. Watch out for trailing slashes ( / )!`;
+                    solution = `The "Detected Redirect URI" (blue box above) is NOT registered in Azure.\n\n1. Copy the URI from the blue box.\n2. Go to Azure Portal > Authentication.\n3. Add it exactly as shown.`;
                 } else if (msg.includes("AADSTS50020")) {
-                    title = "Tenant / Account Error";
-                    solution = "You are signing in with a Personal account (Outlook/Hotmail) or an account from a different organization.\nThis app is locked to Tenant ID: 3eb0a4e0...";
-                } else if (msg.includes("AADSTS7000218")) {
-                    title = "Wrong Platform Config";
-                    solution = "In Azure Portal > Authentication, ensure you added 'Single-page application' platform.\nDo NOT use 'Web' platform (it requires a client secret, which causes this error).";
+                    title = "Account Access Denied";
+                    solution = "You must sign in with an 'ADDEV Materials' organizational account.\nPersonal accounts (Outlook/Hotmail) are not allowed in this tenant.";
                 } else if (error.errorCode === "popup_window_error") {
                     title = "Popup Blocked";
                     solution = "Your browser blocked the login popup. Please allow popups for this site.";
@@ -214,8 +219,10 @@
         function handleResponse(response) {
             if (response !== null) {
                 accessToken = response.accessToken;
+                console.log("Sign-in successful.");
                 updateUIForUser(response.account);
                 document.getElementById('auth-error-details').style.display = 'none';
+                document.getElementById('config-panel').style.display = 'none'; // Hide config help on success
             }
         }
 
@@ -235,18 +242,21 @@
                 signInButton.style.display = 'none';
                 signOutButton.style.display = 'block';
                 authStatus.innerText = `Signed in as: ${account.name}`;
-                authStatus.style.color = 'green';
-                checkFilesStatus();
+                authStatus.style.color = '#28a745';
+                authStatus.style.fontWeight = 'bold';
             } else {
                 signInButton.style.display = 'block';
                 signOutButton.style.display = 'none';
                 authStatus.innerText = "";
             }
+            checkFilesStatus();
         }
 
-        // --- FILE & LOGIC (Standard) ---
+
+        // --- FILE & LOGIC ---
         let allOrdersData = null;
         let sdsFiles = [];
+        let emailLog = [];
         let processedOrders = [];
         let currentManualSdsResults = [];
         let debounceTimer;
@@ -266,6 +276,7 @@
                 const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
                 let sheetName = workbook.SheetNames.find(n => n.toLowerCase().includes('order')) || workbook.SheetNames[0];
                 allOrdersData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+                console.log(`Loaded ${allOrdersData.length} total orders.`);
                 checkFilesStatus();
             };
             reader.readAsArrayBuffer(file);
@@ -274,24 +285,273 @@
         function handleSdsFolder(files) {
             sdsFiles = [];
             for (const file of files) {
-                if (file.name.toLowerCase().endsWith('.pdf')) sdsFiles.push(file); 
+                if (file.name.toLowerCase().endsWith('.pdf')) {
+                    sdsFiles.push(file); 
+                }
             }
             sdsFiles.sort((a, b) => a.webkitRelativePath.localeCompare(b.webkitRelativePath));
+            console.log(`${sdsFiles.length} SDS files loaded.`);
             checkFilesStatus();
         }
 
         function checkFilesStatus() {
             const button = document.getElementById('processButton');
-            if (allOrdersData && sdsFiles.length > 0 && accessToken) {
-                button.disabled = false;
-                button.className = 'button-ready';
+            if (allOrdersData && sdsFiles.length > 0) {
+                 if (accessToken) {
+                    button.disabled = false;
+                    button.className = 'button-ready';
+                    button.innerText = "Process Files";
+                 } else {
+                    button.disabled = true;
+                    button.className = 'button-disabled';
+                    button.innerText = "Sign In Required to Process";
+                 }
             } else {
                 button.disabled = true;
                 button.className = 'button-disabled';
+                if(!allOrdersData && sdsFiles.length === 0) button.innerText = "Select Files to Begin";
+                else if(!allOrdersData) button.innerText = "Select Order File";
+                else button.innerText = "Select SDS Folder";
             }
         }
-        
-        // --- HELPER FUNCTIONS ---
+
+        // --- MATCHING & HELPERS ---
+        function normalizeString(str) { return str.toLowerCase().replace(/[\s-_]/g, ''); }
+
+        function cleanDescription(description) {
+            if (typeof description !== 'string' || !description) return "";
+            const packagingTerms = ["fles 10ml","release agent spray 12 oz","can","bottle","quart","tube","1 gram","fles","40 ml. Applicator Pen","Jerry","cart 750ml","Spatulas box 100x3.5gr","500 gram","5 liter","roll 36\" x 100 yd unbleached","Tin 1 Kg","Dyed - (#004675) 12 oz","cartridge","2 gallon","resin clear 1 liter","pint","6 oz (3.5 oz fill)","Corrosion Resist Sealant 500 ml kit","1/2 inch","400 ml","gallon","10kg","2 Oz Touch up Kit","25 liter","pouch 100 wipes","6 oz","thinner 0,5 liter","Activator 1 liter","Epoxy Primer 4 liter","155kg drum","kit","drum","pail","roll","oz","ml","liter","gram","spray","aerosol","wipes","pen","bag","box","kit"];
+            const pattern = new RegExp(`\\s*(${packagingTerms.join('|')}).*`, 'i');
+            let cleaned = description.replace(pattern, '');
+            cleaned = cleaned.replace(/[\/\-_,]+$/, '').trim();
+            return cleaned;
+        }
+
+        function extractVersionNumber(filename) {
+            const match = filename.match(/_V(\d+)/i);
+            return match ? parseInt(match[1], 10) : 0;
+        }
+
+        async function getCountryCodeFromGeoNames(placeName) {
+            if (!placeName || typeof placeName !== 'string') return null;
+            const lowerPlaceName = placeName.toLowerCase();
+            if (lowerPlaceName.includes('schimatari viotias')) return 'GR';
+            if (lowerPlaceName.includes('sigonella')) return 'IT';
+            if (lowerPlaceName.includes('schiphol oost')) return 'NL';
+            if (lowerPlaceName.includes('dubai airport freezone')) return 'AE';
+            if (lowerPlaceName.includes('kahramankaza')) return 'TR';
+            
+            const cleanedPlaceName = placeName.split(',')[0].trim();
+            const url = `https://secure.geonames.org/searchJSON?q=${encodeURIComponent(cleanedPlaceName)}&maxRows=1&username=nielssecoa.nl`;
+            try {
+                const response = await fetch(url);
+                if (!response.ok) return null;
+                const data = await response.json();
+                if (data.geonames && data.geonames.length > 0) return data.geonames[0].countryCode;
+                return null;
+            } catch (error) { return null; }
+        }
+
+        function getFormattedLandcode(countryCode) {
+            if (!countryCode) return 'N/A';
+            const code = countryCode.toUpperCase();
+            const euCountries = new Set(["AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", "HR", "HU", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK"]);
+            return euCountries.has(code) ? `EU ${code}` : code;
+        }
+
+        function findSdsMatch(originalDesc, countryCode, sdsFileList) {
+            if (!sdsFileList || sdsFileList.length === 0 || !originalDesc) return null;
+            const cleanedDesc = cleanDescription(originalDesc);
+            const normalizedDesc = normalizeString(cleanedDesc);
+            if (!normalizedDesc) return null;
+
+            const lowerCountryCode = countryCode ? countryCode.toLowerCase() : '';
+            let productMatches = sdsFileList.filter(file => normalizeString(file.name).includes(normalizedDesc));
+            
+            if (productMatches.length === 0) {
+                productMatches = sdsFileList.filter(file => {
+                    let baseName = file.name.toLowerCase().replace(/\.pdf$/, '').replace(/_v\d+/, '').replace(/_(complete|eu|en|nl|de|fr|es|it|gr|tr|ae)_/g, '_').replace(/ (complete|eu|en|nl|de|fr|es|it|gr|tr|ae) /g, ' ');
+                    baseName = normalizeString(baseName);
+                    return baseName.length >= 6 && normalizedDesc.includes(baseName);
+                });
+            }
+            if (productMatches.length === 0) return null;
+
+            let potentialMatches = [];
+            if (lowerCountryCode) {
+                potentialMatches = productMatches.filter(file => file.name.toLowerCase().includes(` ${lowerCountryCode} `) || file.name.toLowerCase().includes(`_${lowerCountryCode}_`));
+            }
+            if (potentialMatches.length === 0) {
+                if (lowerCountryCode === 'be') {
+                    potentialMatches = productMatches.filter(file => file.name.toLowerCase().includes(' nl ') || file.name.toLowerCase().includes('_nl_'));
+                }
+                if (potentialMatches.length === 0) {
+                    const enMatches = productMatches.filter(file => file.name.toLowerCase().includes(' en ') || file.name.toLowerCase().includes('_en_'));
+                    potentialMatches = enMatches.length > 0 ? enMatches : productMatches;
+                }
+            }
+
+            if (potentialMatches.length > 1) {
+                const completeMatch = potentialMatches.find(file => file.webkitRelativePath.toLowerCase().includes('complete'));
+                if (completeMatch) return completeMatch;
+                potentialMatches.sort((a, b) => extractVersionNumber(b.name) - extractVersionNumber(a.name));
+            }
+            return potentialMatches[0] || null;
+        }
+
+        // --- EMAIL LOGIC ---
+        async function sendEmail(index) {
+            const order = processedOrders[index];
+            if (!order.toEmail || !order.sdsMatch) return;
+
+            const button = document.querySelector(`#results-container tr:nth-child(${index + 1}) button`);
+            const originalText = button.innerText;
+            button.disabled = true;
+            button.innerText = 'Sending...';
+
+            const body = `Dear customer,\n\nPlease find the relevant document(s) for your recent order.\n\nOrder Details:\n- Your PO#: ${order.subject}\n- Product: ${order.description}\n- Our Order#: ${order.orderNumber}\n\nIf there are any questions regarding this email or its content, please reply to this e-mail or send a e-mail to hse.nl@addevmaterials.com\n\nWith kind regards,\nADDEV Materials Aerospace B.V.\nBunsenstraat 21, 3316 GC, Dordrecht, The Netherlands.`;
+
+            try {
+                await sendEmailWithAttachmentViaGraphAPI(order.toEmail, order.ccEmail, `PO# ${order.subject}`, body, order.sdsMatch);
+                
+                emailLog.push(`${new Date().toLocaleString()} - Email sent to: ${order.toEmail} for PO# ${order.subject} with attachment: ${order.sdsMatch.name}`);
+                updateLogView();
+
+                const orderKey = `${order.orderNumber}|${order.subject}`;
+                let processed = new Set(JSON.parse(localStorage.getItem('processedOrders')) || []);
+                processed.add(orderKey);
+                localStorage.setItem('processedOrders', JSON.stringify([...processed]));
+
+                const tableRow = document.querySelector(`#results-container tbody tr:nth-child(${index + 1})`);
+                if (tableRow) {
+                    tableRow.classList.add('processed-row');
+                    button.innerText = 'Sent';
+                }
+            } catch (error) {
+                console.error("Email error:", error);
+                alert(`Failed to send email: ${error.message}`);
+                button.disabled = false;
+                button.innerText = originalText;
+            }
+        }
+
+        async function sendEmailWithAttachmentViaGraphAPI(to, cc, subject, body, attachmentFile) {
+            if (!accessToken) throw new Error("Access token is empty.");
+            const reader = new FileReader();
+            const fileAsBase64 = await new Promise((resolve, reject) => {
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = error => reject(error);
+                reader.readAsDataURL(attachmentFile);
+            });
+            
+            const emailMessage = {
+                message: {
+                    subject: subject,
+                    body: { contentType: "text", content: body },
+                    toRecipients: [{ emailAddress: { address: to } }],
+                    attachments: [{ "@odata.type": "#microsoft.graph.fileAttachment", "name": attachmentFile.name, "contentType": "application/pdf", "contentBytes": fileAsBase64 }]
+                }
+            };
+            if (cc) emailMessage.message.ccRecipients = [{ emailAddress: { address: cc } }];
+
+            const response = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
+                body: JSON.stringify(emailMessage)
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error ? errorData.error.message : response.statusText);
+            }
+        }
+
+        // --- UI ---
+        function filterSds(event, orderIndex) {
+            const searchTerm = event.target.value.toLowerCase();
+            const resultsContainer = document.getElementById(`sds-results-${orderIndex}`);
+            if (searchTerm.length < 3) {
+                resultsContainer.innerHTML = '';
+                resultsContainer.style.display = 'none';
+                return;
+            }
+            currentManualSdsResults = sdsFiles.filter(file => file.webkitRelativePath.toLowerCase().includes(searchTerm)).slice(0, 15);
+            resultsContainer.innerHTML = currentManualSdsResults.length === 0 ? '<div>No files found</div>' : currentManualSdsResults.map((file, i) => `<div onclick='selectSds(${i}, ${orderIndex})'>${file.name} (..${file.webkitRelativePath.slice(-50)})</div>`).join('');
+            resultsContainer.style.display = 'block';
+        }
+
+        function selectSds(fileIndex, orderIndex) {
+            const selectedFile = currentManualSdsResults[fileIndex];
+            if (!selectedFile) return;
+            processedOrders[orderIndex].sdsMatch = selectedFile;
+            const tableRow = document.querySelector(`#results-container tbody tr:nth-child(${orderIndex + 1})`);
+            const matchCell = tableRow.children[5];
+            matchCell.innerHTML = selectedFile.name;
+            matchCell.className = 'sds-match';
+            tableRow.querySelector('button').disabled = false;
+            document.getElementById(`sds-results-${orderIndex}`).style.display = 'none';
+        }
+
+        async function displayResults(ordersToProcess) {
+            const container = document.getElementById('results-container');
+            container.innerHTML = `<p class="status" id="progress-status">Processing ${ordersToProcess.length} orders...</p>`;
+            
+            const tableHeader = `<thead><tr><th>Date</th><th>Subject (PO)</th><th>Description</th><th>Ship To</th><th>Landcode</th><th>Matching SDS PDF</th><th>To Email</th><th>CC Email</th><th>Action</th></tr></thead>`;
+            let tableBody = '';
+            processedOrders = []; 
+
+            for (let i = 0; i < ordersToProcess.length; i++) {
+                if (i % 10 === 0) document.getElementById('progress-status').innerText = `Processing... ${i + 1} of ${ordersToProcess.length} complete.`;
+                const order = ordersToProcess[i];
+                const shipTo = getValueCaseInsensitive(order, 'Ship To') || 'N/A';
+                const countryCode = await getCountryCodeFromGeoNames(shipTo);
+                const description = getValueCaseInsensitive(order, 'Description') || '';
+                const sdsMatch = findSdsMatch(description, countryCode, sdsFiles);
+
+                let toEmail = (getValueCaseInsensitive(order, 'SDS Email') || '').toString().trim();
+                let ccEmail = (getValueCaseInsensitive(order, 'Buyer Email') || '').toString().trim();
+                if (!toEmail && ccEmail) { toEmail = ccEmail; ccEmail = ''; }
+
+                processedOrders.push({
+                    date: formatDate(getValueCaseInsensitive(order, 'Originally Promised', 'Order Date')),
+                    subject: getValueCaseInsensitive(order, 'Customer PO') || 'N/A',
+                    description: description,
+                    shipTo: shipTo,
+                    landcode: getFormattedLandcode(countryCode),
+                    toEmail: toEmail,
+                    ccEmail: ccEmail,
+                    orderNumber: getValueCaseInsensitive(order, 'Order Number') || 'N/A',
+                    sdsMatch: sdsMatch 
+                });
+
+                const matchCell = sdsMatch ? `<td class="sds-match">${sdsMatch.name}</td>` : `<td class="sds-no-match"><div class="sds-search-container"><input type="text" onkeyup="filterSds(event, ${i})" placeholder="Search SDS..." autocomplete="off"><div class="sds-results" id="sds-results-${i}"></div></div></td>`;
+                tableBody += `<tr><td>${processedOrders[i].date}</td><td>${processedOrders[i].subject}</td><td>${processedOrders[i].description}</td><td>${processedOrders[i].shipTo}</td><td>${processedOrders[i].landcode}</td>${matchCell}<td>${processedOrders[i].toEmail}</td><td>${processedOrders[i].ccEmail}</td><td><button onclick="sendEmail(${i})" ${!sdsMatch ? 'disabled' : ''}>Send Email</button></td></tr>`;
+            }
+            container.innerHTML = `<table>${tableHeader}<tbody>${tableBody}</tbody></table>`;
+        }
+
+        function processFiles() {
+            if (!allOrdersData || sdsFiles.length === 0) return alert("Please select both the Orders file and the SDS Folder first.");
+            displayResults(getDefaultOrderList());
+        }
+
+        function getDefaultOrderList() {
+            const showProcessed = document.getElementById('showProcessedCheckbox').checked;
+            let ordersToFilter = allOrdersData;
+            if (!showProcessed) {
+                const processedKeys = new Set(JSON.parse(localStorage.getItem('processedOrders')) || []);
+                ordersToFilter = allOrdersData.filter(order => !processedKeys.has(`${getValueCaseInsensitive(order, 'Order Number')}|${getValueCaseInsensitive(order, 'Customer PO')}`));
+            }
+            const today = new Date();
+            const diff = today.getDate() - today.getDay() + (today.getDay() === 0 ? -6 : 1);
+            const monday = new Date(today.setDate(diff));
+            monday.setHours(0,0,0,0);
+            
+            return ordersToFilter.filter(order => {
+                const d = getValueCaseInsensitive(order, 'Originally Promised');
+                return d instanceof Date && d >= monday;
+            }).sort((a,b) => getValueCaseInsensitive(a,'Originally Promised') - getValueCaseInsensitive(b,'Originally Promised')).slice(0, 100);
+        }
+
         function getValueCaseInsensitive(obj, ...keys) {
             for (const key of keys) {
                 const lowerKey = key.toLowerCase().trim();
@@ -304,41 +564,33 @@
 
         function formatDate(date) {
             if (!date || !(date instanceof Date)) return 'N/A';
-            return date.toISOString().split('T')[0];
+            return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
         }
         
-        function normalizeString(str) { return str.toLowerCase().replace(/[\s-_]/g, ''); }
-
-        function cleanDescription(description) {
-            if (!description) return "";
-            return description.split(/[\d]+(ml|oz|g|kg|l|liter)/i)[0].trim(); // Simplified cleaner for debug
+        function toggleProcessedOrders() { filterByPO(document.getElementById('searchInput').value); }
+        function filterByPO(searchTerm) {
+            if (!allOrdersData) return;
+            displayResults(searchTerm ? allOrdersData.filter(o => (getValueCaseInsensitive(o, 'Customer PO')||'').toString().toLowerCase().includes(searchTerm.toLowerCase())) : getDefaultOrderList());
         }
-
-        // --- MATCHING LOGIC ---
-        function findSdsMatch(desc, country, files) {
-            if (!desc || !files.length) return null;
-            const normalizedDesc = normalizeString(cleanDescription(desc));
-            return files.find(f => normalizeString(f.name).includes(normalizedDesc)) || null;
+        function updateLogView() {
+            document.getElementById('log-container').style.display = 'block';
+            document.getElementById('log-area').textContent = emailLog.join('\n');
+            document.getElementById('log-area').scrollTop = document.getElementById('log-area').scrollHeight;
         }
-
-        // --- UI GENERATION ---
-        function processFiles() {
-            const tableBody = allOrdersData.slice(0, 50).map((order, i) => {
-                const desc = getValueCaseInsensitive(order, 'Description');
-                const match = findSdsMatch(desc, 'NL', sdsFiles);
-                return `<tr>
-                    <td>${formatDate(getValueCaseInsensitive(order, 'Order Date'))}</td>
-                    <td>${getValueCaseInsensitive(order, 'Customer PO')}</td>
-                    <td>${desc}</td>
-                    <td class="${match ? 'sds-match' : 'sds-no-match'}">${match ? match.name : 'No Match'}</td>
-                    <td><button onclick="alert('Email feature disabled in debug mode until login is fixed')">Send Email</button></td>
-                </tr>`;
-            }).join('');
-            
-            document.getElementById('results-container').innerHTML = 
-                `<table><thead><tr><th>Date</th><th>PO</th><th>Desc</th><th>SDS</th><th>Action</th></tr></thead><tbody>${tableBody}</tbody></table>`;
+        function downloadLog() {
+            const blob = new Blob([emailLog.join('\n')], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `sds_email_log_${new Date().toISOString().slice(0,10)}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
         }
-
+        if(myMSALObj) {
+            const accounts = myMSALObj.getAllAccounts();
+            if (accounts.length > 0) { myMSALObj.setActiveAccount(accounts[0]); updateUIForUser(accounts[0]); }
+        }
     </script>
 </body>
 </html>
